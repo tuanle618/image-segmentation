@@ -1,6 +1,8 @@
 from unet.model import UNet
 from tiramisu.model import FCDenseNet
-from utils import get_number_params
+from utils.helpers import get_number_params
+from utils.transform import my_transforms
+
 
 unet = UNet()
 fcdnet = FCDenseNet()

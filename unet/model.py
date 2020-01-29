@@ -7,12 +7,12 @@ class UNet(nn.Module):
     """
     Wrapper for U-Net Model including the Contracting Path and Expansion Path
     """
-    def __init__(self, n_channels=3, n_class=2, bn=True, padding=1, upsampling=True):
+    def __init__(self, in_channels=3, n_classes=1, bn=True, padding=1, upsampling=True):
         """
         Instantiates the U-Net model according to the paper
         "U-Net: Convolutional Networks for Biomedical Image Segmentation" (https://arxiv.org/pdf/1505.04597.pdf)
         :param n_channels: Channels of input image. Defaults to 3 for RGB images
-        :param n_class: Class for segmentation. Defaults to 2 to train a segmentation model to extract foreground from
+        :param n_classes: Class for segmentation. Defaults to 1 to train a segmentation model to extract foreground from
                         background.
         :param bn: Boolean whether or not batch-normalization should be used in the DoubleConvolution operation
         :param padding: Integer 0/1 to apply same padding (1) or valid padding (0). If valid padding (0) is used, the
@@ -23,13 +23,13 @@ class UNet(nn.Module):
         """
 
         super().__init__()
-        self.n_channels = n_channels
-        self.n_class = n_class
+        self.in_channels = in_channels
+        self.n_classes = n_classes
         self.upsampling = upsampling
 
         # Start with double convolution layer without reducing height and width but only feature-map dim
         # here: input image [3, 256, 256]
-        self.contract = DoubleConv(n_channels, 64, padding, bn)  # Out [64, 256, 256]
+        self.contract = DoubleConv(in_channels, 64, padding, bn)  # Out [64, 256, 256]
 
         # Build contraction layers
         # here: input is output of doubleconv layer. With downconv1 the contraction with maxpooling starts.
@@ -45,7 +45,7 @@ class UNet(nn.Module):
         self.upconv4 = UpConvolution(128, 64, padding, bn, upsampling)  # Out [32+32, 256, 256]
 
         # Add output segmentation layer
-        self.out_segementation = OutConv(64, n_class) # Out [2, 128, 128]
+        self.out_segementation = OutConv(64, self.n_classes) # Out [1, 128, 128]
 
     def forward(self, x):
         # Compute contractions parts

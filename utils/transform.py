@@ -1,6 +1,7 @@
 import numpy as np
 from skimage.transform import rescale, rotate
 from torchvision.transforms import Compose
+import torch
 
 def my_transforms(scale=None, angle=None, flip_prob=None):
     transform_list = []
@@ -12,6 +13,8 @@ def my_transforms(scale=None, angle=None, flip_prob=None):
         transform_list.append(HorizontalFlip(flip_prob))
         transform_list.append(VerticalFlip(flip_prob))
 
+    transform_list.append(CustomToTensor())
+
     return Compose(transform_list)
 
 ## Custom Transform Classes:
@@ -21,7 +24,8 @@ class Scale(object):
         self.scale = scale
 
     def __call__(self, sample):
-        image, mask = sample
+        image = sample['image']
+        mask = sample['mask']
         img_size = image.shape[0]
         # get a new randomized scale because we want to use this transform for data augmentation
         scale = np.random.uniform(low=1.0-self.scale, high=1.0+self.scale)
@@ -55,20 +59,21 @@ class Scale(object):
             image = image[x_min:x_max, x_min:x_max, ...]
             mask = mask[x_min:x_max, x_min:x_max, ...]
 
-        return image, mask
+        return {'image':image, 'mask':mask}
 
 class Rotate(object):
     def __init__(self, angle):
         self.angle = angle
 
     def __call__(self, sample):
-        image, mask = sample
+        image = sample['image']
+        mask = sample['mask']
         angle = np.random.uniform(low=-self.angle, high=self.angle)
         image = rotate(image, angle, resize=False, preserve_range=True, mode="constant")
         mask = rotate(
             mask, angle, resize=False, order=0, preserve_range=True, mode="constant"
         )
-        return image, mask
+        return {'image':image, 'mask':mask}
 
 class HorizontalFlip(object):
 
@@ -76,7 +81,8 @@ class HorizontalFlip(object):
         self.flip_prob = flip_prob
 
     def __call__(self, sample):
-        image, mask = sample
+        image = sample['image']
+        mask = sample['mask']
 
         if np.random.rand() > self.flip_prob:
             return image, mask
@@ -84,7 +90,7 @@ class HorizontalFlip(object):
         image = np.fliplr(image).copy()
         mask = np.fliplr(mask).copy()
 
-        return image, mask
+        return {'image':image, 'mask':mask}
 
 class VerticalFlip(object):
 
@@ -92,7 +98,8 @@ class VerticalFlip(object):
         self.flip_prob = flip_prob
 
     def __call__(self, sample):
-        image, mask = sample
+        image = sample['image']
+        mask = sample['mask']
 
         if np.random.rand() > self.flip_prob:
             return image, mask
@@ -100,8 +107,23 @@ class VerticalFlip(object):
         image = np.flipud(image).copy()
         mask = np.flipud(mask).copy()
 
-        return image, mask
+        return {'image':image, 'mask':mask}
 
+class CustomToTensor(object):
+    def __init__(self):
+        pass
+
+    def __call__(self, sample):
+        image = sample['image']
+        mask = sample['mask']
+
+        if np.max(image) > 1:
+            image = image/255.0
+
+        image = torch.tensor(data=image, dtype=torch.float32).permute(dims=(2, 0, 1))
+        mask = torch.tensor(data=mask, dtype=torch.uint8).permute(dims=(2, 0, 1))
+
+        return {'image':image, 'mask':mask}
 
 
 

@@ -5,7 +5,6 @@ import torch
 from skimage.io import imread
 from torch.utils.data import Dataset
 
-
 class DataSetfromNumpy(Dataset):
     """
     Custom dataset object thats loads the entire training images and masks into memory
@@ -23,7 +22,7 @@ class DataSetfromNumpy(Dataset):
         return self.n
 
     def __getitem__(self, item):
-        sample = (self.images[item], self.masks[item])
+        sample = {'image':self.images[item], 'mask':self.masks[item]}
 
         if self.transform is not None:
             return self.transform(sample)

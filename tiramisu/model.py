@@ -8,7 +8,7 @@ class FCDenseNet(nn.Module):
     Implements the Fully-Convolutional DenseNet according to https://arxiv.org/pdf/1611.09326.pdf
     Paper: "The One Hundred Layers Tiramisu: Fully Convolutional DenseNets for Semantic Segmentation"
     """
-    def __init__(self, in_channels=3, n_classes=2, n_filter_first_conv=48,
+    def __init__(self, in_channels=3, n_classes=1, n_filter_first_conv=48,
                  n_pool=4, growth_rate=12, n_layers_per_block=4, dropout_p=0.2):
         super().__init__()
         """
@@ -18,7 +18,7 @@ class FCDenseNet(nn.Module):
         Skip connections are used between the downsampling path and the upsampling path
         Each layer is a composite function of BN - ReLU - Conv and the last layer is a softmax layer.
         :param in_channels: dimension of image channel. Defaults to 3.
-        :param n_classes: number of classes. Defaults to 2.
+        :param n_classes: number of classes. Defaults to 1.
         :param n_filters_first_conv: number of filters for the first convolution applied. Defaults to 48
         :param n_pool: number of pooling layers = number of transition down = number of transition up. Default 4
         :param growth_rate: number of new feature maps created by each layer in a dense block. Defaults to 12
@@ -35,6 +35,8 @@ class FCDenseNet(nn.Module):
             self.bottleneck_list = n_layers_per_block
         else:
             raise ValueError
+
+        self.n_classes = n_classes
 
         #####################
         # First Convolution #
@@ -163,13 +165,13 @@ class FCDenseNet(nn.Module):
         # Apply last convolution layer
         x = self.lastConvLayer(x)
         # Apply softmax activation
-        x = self.softmax(x)
+        #x = self.softmax(x)
 
         return x
 
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-fcn = FCDenseNet(in_channels=3, n_classes=2, n_filter_first_conv=48,
+fcn = FCDenseNet(in_channels=3, n_classes=1, n_filter_first_conv=48,
                  n_pool=4, growth_rate=12, n_layers_per_block=4, dropout_p=0.2).to(device)
 x = torch.randn(2, 3, 256, 256, device=device)
 y = fcn(x)

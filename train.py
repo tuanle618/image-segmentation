@@ -14,6 +14,13 @@ from torch.optim import Adam
 from torch.utils.data import random_split, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
+import datetime
+
+def weights_init(m):
+    if isinstance(m, torch.nn.Conv2d):
+        torch.nn.init.kaiming_normal_(tensor=m.weight, mode='fan_in', nonlinearity='relu')
+        torch.nn.init.zeros_(tensor=m.bias)
+
 
 def save_args(args, modelpath):
     args_file = os.path.join(os.path.join(modelpath, "args.json"))
@@ -84,10 +91,10 @@ def get_argparse():
         "--images", type=str, default="data/data-science-bowl-2018/stage1_train", help="root folder with images"
     )
     parser.add_argument(
-        "--image-size",
+        "--image_size",
         type=int,
-        default=256,
-        help="target input image size (default: 256)",
+        default=128,
+        help="target input image size (default: 128)",
     )
     parser.add_argument(
         "--aug_scale",
@@ -129,6 +136,9 @@ def main(args):
     else:
         print('Parsed model argument "{}" invalid. Possible choices are "u-net" or "fcd-net"'.format(args.model))
 
+    # Init weights for model
+    model = model.apply(weights_init)
+
     transforms = my_transforms(scale=args.aug_scale,
                                angle=args.aug_angle,
                                flip_prob=args.aug_flip)
@@ -136,8 +146,8 @@ def main(args):
 
 
     # create pytorch dataset
-    dataset = DataSetfromNumpy(image_npy_path='data/train_img.npy',
-                               mask_npy_path='data/train_mask.npy',
+    dataset = DataSetfromNumpy(image_npy_path='data/train_img_{}x{}.npy'.format(args.image_size, args.image_size),
+                               mask_npy_path='data/train_mask_{}x{}.npy'.format(args.image_size, args.image_size),
                                transform=transforms)
 
     # create training and validation set
@@ -154,20 +164,22 @@ def main(args):
     val_loader = DataLoader(val, batch_size=args.batch_size, shuffle=False, num_workers=args.workers)
 
     dc_loss = DiceLoss()
-    best_validation_dc = 0.0
     writer = SummaryWriter(log_dir=args.logs)
     optimizer = Adam(params=model.parameters(), lr=args.lr)
+    # Learning rate scheduler
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.9, patience=5)
 
     loss_train = []
     loss_valid = []
-    step = 0
 
     # training loop:
     global_step = 0
     for epoch in range(args.epochs):
+        epoch_start_time = datetime.datetime.now().replace(microsecond=0)
         # set model into train mode
         model = model.train()
-        epoch_loss = 0
+        train_epoch_loss = 0
+        valid_epoch_loss = 0
         # tqdm progress bar
         with tqdm(total=n_train, desc=f'Epoch {epoch + 1}/{args.epochs}', unit='img') as pbar:
             for batch in train_loader:
@@ -180,7 +192,7 @@ def main(args):
                 predicted_masks = F.softmax(model(imgs), dim=1)
                 # compute dice loss
                 loss = dc_loss(y_true=true_masks, y_pred=predicted_masks)
-                epoch_loss += loss.item()
+                train_epoch_loss += loss.item()
                 # update model network weights
                 optimizer.zero_grad()
                 loss.backward()
@@ -192,17 +204,16 @@ def main(args):
 
                 # do evaluation and logging
                 val_loss = eval_net(model, val_loader, device, dc_loss)
+                valid_epoch_loss += val_loss
                 # logging
                 writer.add_scalar('Loss/train', loss.item(), global_step)
+                writer.add_scalar('Loss/validation', val_loss, global_step)
                 if model.n_classes > 1:
                     pbar.set_postfix(**{'Training CE loss (batch)': loss.item(),
                                         'Validation CE': val_loss})
-                    writer.add_scalar('Loss/validation', val_loss, global_step)
-
                 else:
-                    pbar.set_postfix(**{'Trainig dice loss (batch)': loss.item(),
+                    pbar.set_postfix(**{'Training dice loss (batch)': loss.item(),
                                         'Validation dice loss': val_loss})
-                    writer.add_scalar('Dice/validation', val_loss, global_step)
 
                 # save images as well as true + predicted masks into writer
                 if global_step % args.vis_images == 0:
@@ -212,20 +223,36 @@ def main(args):
                         writer.add_images('masks/pred', torch.sigmoid(predicted_masks) > 0.5, global_step)
 
 
+            # Apply learning rate scheduler per epoch
+            scheduler.step(valid_epoch_loss)
+            # Only save the model in case the validation metric is best
+            best_model_bool = [valid_epoch_loss < l for l in loss_valid]
+            best_model_bool = np.all(best_model_bool)
 
+            if best_model_bool:
+                pbar.write(s='Saving model and optimizers at epoch {} with best validation loss of {}'.format(
+                    epoch, valid_epoch_loss
+                ))
+                torch.save(obj={
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'lr_scheduler': scheduler.state_dict(),
+                },
+                    f=results_path + '/model_epoch-{}_val_loss-{}.pth'.format(epoch, np.round(valid_epoch_loss, 4))
+                )
+                epoch_time_difference = datetime.datetime.now().replace(microsecond=0) - epoch_start_time
+                pbar.write('Epoch: {:3d} time execution: {}'.format(epoch, epoch_time_difference))
 
+    print('Finished training the segmentation model.\
+                                       All results can be found at: {}'.format(results_path))
+    # save scalars dictionary as json file
+    scalars = {'loss_train': loss_train,
+               'loss_valid': loss_valid}
+    with open('{}/all_scalars.json'.format(results_path), 'w') as fp:
+        json.dump(scalars, fp)
 
-
-
-
-
-
-
-
-
-
-
-
+    print('Logging file for tensorboard is stored at {}'.format(args.logs))
+    writer.close()
 
 
 if __name__ == '__main__':

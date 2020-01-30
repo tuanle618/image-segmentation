@@ -9,7 +9,7 @@ class FCDenseNet(nn.Module):
     Paper: "The One Hundred Layers Tiramisu: Fully Convolutional DenseNets for Semantic Segmentation"
     """
     def __init__(self, in_channels=3, n_classes=1, n_filter_first_conv=48,
-                 n_pool=4, growth_rate=12, n_layers_per_block=4, dropout_p=0.2):
+                 n_pool=4, growth_rate=8, n_layers_per_block=4, dropout_p=0.2):
         super().__init__()
         """
         This code implements the Fully Convolutional DenseNet described in https://arxiv.org/abs/1611.09326

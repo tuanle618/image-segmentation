@@ -164,7 +164,7 @@ def main(args):
     val_loader = DataLoader(val, batch_size=args.batch_size, shuffle=False, num_workers=args.workers)
 
     dc_loss = DiceLoss()
-    writer = SummaryWriter(log_dir=args.logs)
+    writer = SummaryWriter(log_dir=os.path.join(args.logs, args.model))
     optimizer = Adam(params=model.parameters(), lr=args.lr)
     # Learning rate scheduler
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.9, patience=5)
@@ -175,6 +175,7 @@ def main(args):
     # training loop:
     global_step = 0
     for epoch in range(args.epochs):
+        eval_count = 0
         epoch_start_time = datetime.datetime.now().replace(microsecond=0)
         # set model into train mode
         model = model.train()
@@ -189,7 +190,12 @@ def main(args):
                                               dtype=torch.float32 if model.n_classes == 1 else torch.long)
 
                 # compute prediction masks
-                predicted_masks = F.softmax(model(imgs), dim=1)
+                predicted_masks = model(imgs)
+                if model.n_classes == 1:
+                    predicted_masks = torch.sigmoid(predicted_masks)
+                elif model.n_classes > 1:
+                    predicted_masks = F.softmax(predicted_masks, dim=1)
+
                 # compute dice loss
                 loss = dc_loss(y_true=true_masks, y_pred=predicted_masks)
                 train_epoch_loss += loss.item()
@@ -198,23 +204,24 @@ def main(args):
                 loss.backward()
                 optimizer.step()
 
-                # update progress bar per batch-size
-                pbar.update(imgs.shape[0])
-                global_step += 1
-
-                # do evaluation and logging
-                val_loss = eval_net(model, val_loader, device, dc_loss)
-                valid_epoch_loss += val_loss
                 # logging
                 writer.add_scalar('Loss/train', loss.item(), global_step)
-                writer.add_scalar('Loss/validation', val_loss, global_step)
-                if model.n_classes > 1:
-                    pbar.set_postfix(**{'Training CE loss (batch)': loss.item(),
-                                        'Validation CE': val_loss})
-                else:
-                    pbar.set_postfix(**{'Training dice loss (batch)': loss.item(),
-                                        'Validation dice loss': val_loss})
+                # update progress bar
+                pbar.update(imgs.shape[0])
+                # Do evaluation every 25 training steps
+                if global_step % 25 == 0:
+                    eval_count += 1
+                    val_loss = np.mean(eval_net(model, val_loader, device, dc_loss))
+                    valid_epoch_loss += val_loss
+                    writer.add_scalar('Loss/validation', val_loss, global_step)
+                    if model.n_classes > 1:
+                        pbar.set_postfix(**{'Training CE loss (batch)': loss.item(),
+                                            'Validation CE (val set)': val_loss})
+                    else:
+                        pbar.set_postfix(**{'Training dice loss (batch)': loss.item(),
+                                            'Validation dice loss (val set)': val_loss})
 
+                global_step += 1
                 # save images as well as true + predicted masks into writer
                 if global_step % args.vis_images == 0:
                     writer.add_images('images', imgs, global_step)
@@ -222,17 +229,27 @@ def main(args):
                         writer.add_images('masks/true', true_masks, global_step)
                         writer.add_images('masks/pred', torch.sigmoid(predicted_masks) > 0.5, global_step)
 
+            # Get estimation of training and validation loss for entire epoch
+            valid_epoch_loss /= eval_count
+            train_epoch_loss /= len(train_loader)
 
             # Apply learning rate scheduler per epoch
             scheduler.step(valid_epoch_loss)
-            # Only save the model in case the validation metric is best
-            best_model_bool = [valid_epoch_loss < l for l in loss_valid]
-            best_model_bool = np.all(best_model_bool)
+            # Only save the model in case the validation metric is best. For the first epoch, directly save
+            if epoch > 0:
+                best_model_bool = [valid_epoch_loss < l for l in loss_valid]
+                best_model_bool = np.all(best_model_bool)
+            else:
+                best_model_bool = True
+
+            # append
+            loss_train.append(train_epoch_loss)
+            loss_valid.append(valid_epoch_loss)
 
             if best_model_bool:
-                pbar.write(s='Saving model and optimizers at epoch {} with best validation loss of {}'.format(
-                    epoch, valid_epoch_loss
-                ))
+                print('\nSaving model and optimizers at epoch {} with best validation loss of {}'.format(
+                    epoch, valid_epoch_loss)
+                )
                 torch.save(obj={
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
@@ -241,10 +258,9 @@ def main(args):
                     f=results_path + '/model_epoch-{}_val_loss-{}.pth'.format(epoch, np.round(valid_epoch_loss, 4))
                 )
                 epoch_time_difference = datetime.datetime.now().replace(microsecond=0) - epoch_start_time
-                pbar.write('Epoch: {:3d} time execution: {}'.format(epoch, epoch_time_difference))
+                print('Epoch: {:3d} time execution: {}'.format(epoch, epoch_time_difference))
 
-    print('Finished training the segmentation model.\
-                                       All results can be found at: {}'.format(results_path))
+    print('Finished training the segmentation model.\nAll results can be found at: {}'.format(results_path))
     # save scalars dictionary as json file
     scalars = {'loss_train': loss_train,
                'loss_valid': loss_valid}

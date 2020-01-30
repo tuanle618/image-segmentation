@@ -13,18 +13,19 @@ def eval_net(model, loader, device, loss):
     """
     # turn model into evaluation mode
     model.eval()
-    total_loss = 0
-    for batch in loader:
+    total_loss = [None] * len(loader)
+    for step, batch in enumerate(loader):
         imgs = batch['image'].to(device=device, dtype=torch.float32)
         true_masks = batch['mask'].to(device=device, dtype=torch.float32 if model.n_classes == 1 else torch.long)
-        mask_pred = model(imgs)
-        for true_mask, pred in zip(true_masks, mask_pred):
-            pred = (pred > 0.5).float()
-            if model.n_classes > 1:
-                total_loss += F.cross_entropy(pred.unsqueeze(dim=0), true_mask.unsqueeze(dim=0)).item()
-            else:
-                total_loss += loss(pred, true_mask).item()
+        predicted_masks = model(imgs)
+        if model.n_classes == 1:
+            predicted_masks = torch.sigmoid(predicted_masks)
+        elif model.n_classes > 1:
+            predicted_masks = F.softmax(predicted_masks, dim=1)
+        if model.n_classes > 1:
+            total_loss[step] = F.cross_entropy(predicted_masks, true_masks).item()
+        else:
+            total_loss[step] = loss(predicted_masks, true_masks).item()
 
-
-    return total_loss / len(loader)
+    return total_loss
 

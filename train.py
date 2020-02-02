@@ -132,7 +132,9 @@ def main(args):
         model = UNet(in_channels=3, n_classes=1).to(device)
     elif args.model == 'fcd-net':
         from tiramisu.model import FCDenseNet
-        model = FCDenseNet(in_channels=3, n_classes=1).to(device)
+        # select model archictecture so it can be trained in 16gb ram GPU
+        model = FCDenseNet(in_channels=3, n_classes=1, n_filter_first_conv=48,
+                 n_pool=4, growth_rate=8, n_layers_per_block=3, dropout_p=0.2).to(device)
     else:
         print('Parsed model argument "{}" invalid. Possible choices are "u-net" or "fcd-net"'.format(args.model))
 
@@ -227,7 +229,7 @@ def main(args):
                     writer.add_images('images', imgs, global_step)
                     if model.n_classes == 1:
                         writer.add_images('masks/true', true_masks, global_step)
-                        writer.add_images('masks/pred', torch.sigmoid(predicted_masks) > 0.5, global_step)
+                        writer.add_images('masks/pred', predicted_masks > 0.5, global_step)
 
             # Get estimation of training and validation loss for entire epoch
             valid_epoch_loss /= eval_count
